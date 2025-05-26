@@ -248,7 +248,7 @@ export default function Home() {
                   lg: "repeat(auto-fill, minmax(280px, 1fr))"
                 }}
                 gap={{ base: 4, md: 6 }}
-              >
+          >
                 {restaurants.map((restaurant: Restaurant) => (
                   <RestaurantCard
                     key={restaurant.id}
@@ -413,8 +413,8 @@ export default function Home() {
                   >
                     Halal
                   </Checkbox>
-                </VStack>
-              </Box>
+            </VStack>
+          </Box>
 
               <Button
                 colorScheme="primary"

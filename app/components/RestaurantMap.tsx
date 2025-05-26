@@ -280,8 +280,8 @@ export default function RestaurantMap({
               <Text fontWeight="bold">{selectedRestaurant.name}</Text>
               <Text fontSize="sm" color="gray.600">{selectedRestaurant.address}</Text>
               <HStack>
-                <Badge colorScheme={selectedRestaurant.isOpen ? 'green' : 'red'}>
-                  {selectedRestaurant.isOpen ? 'Open' : 'Closed'}
+                <Badge colorScheme={selectedRestaurant.isOpenNow ? 'green' : 'red'}>
+                  {selectedRestaurant.isOpenNow ? 'Open' : 'Closed'}
                 </Badge>
                 <Badge colorScheme="primary">${selectedRestaurant.priceLevel ? selectedRestaurant.priceLevel * 15 : selectedRestaurant.averagePrice} avg</Badge>
                 <Badge colorScheme="yellow">
