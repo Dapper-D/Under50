@@ -24,7 +24,6 @@ model Restaurant {
   isOpen      Boolean  @default(true)
 
   // Additional fields for external IDs
-  mapboxId    String?  @unique
   googleId    String?  @unique
 
   @@index([latitude, longitude])

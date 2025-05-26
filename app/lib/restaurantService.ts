@@ -73,29 +73,35 @@ function isCacheValid(entry: CacheEntry): boolean {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // Helper function to handle rate limiting
-async function makeRequestWithRetry(url: string, retries = 3, delayMs = 1000): Promise<{ data: GooglePlacesResponse }> {
+async function makeRequestWithRetry(url: string, retries = 3, delayMs = 1000): Promise<AxiosResponse<GooglePlacesResponse> | { data: { results: never[] } }> {
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await axios.get<GooglePlacesResponse>(url)
-      return response
-    } catch (error) {
-      if (i === retries - 1) {
-        return {
-          data: {
-            status: 'ZERO_RESULTS',
-            results: []
-          }
-        }
+      console.log('Making request to:', url)
+      const response = await axios.get(url)
+      console.log('Response status:', response.status)
+      console.log('Response data:', JSON.stringify(response.data, null, 2))
+      
+      if (response.data.status === 'ZERO_RESULTS') {
+        console.log('Google API returned ZERO_RESULTS')
+        return { data: { results: [] } }
       }
-      await delay(delayMs)
+      if (response.data.status === 'OK') {
+        return response
+      }
+      throw new Error(`Google API returned status: ${response.data.status}`)
+    } catch (error: any) {
+      console.error('Request error:', error.response?.data || error.message)
+      if (error.response?.status === 429 && i < retries - 1) {
+        console.log(`Rate limited, waiting ${delayMs}ms before retry ${i + 1}`)
+        await delay(delayMs)
+        // Exponential backoff
+        delayMs *= 2
+        continue
+      }
+      throw error
     }
   }
-  return {
-    data: {
-      status: 'ZERO_RESULTS',
-      results: []
-    }
-  }
+  throw new Error('Max retries reached')
 }
 
 // Helper function to calculate distance
@@ -269,9 +275,9 @@ export async function findNearbyRestaurants(
     )
 
     const googleResponse = await makeRequestWithRetry(url)
-    
-    // @ts-ignore - Temporarily ignore type error while we work on a proper fix
-    if (googleResponse.data.status === 'ZERO_RESULTS' || !googleResponse.data.results || googleResponse.data.results.length === 0) {
+    console.log('Google Places API response status:', googleResponse.status)
+
+    if (!googleResponse.data.results || googleResponse.data.results.length === 0) {
       console.log('No restaurants found in Google Places response')
       return []
     }
