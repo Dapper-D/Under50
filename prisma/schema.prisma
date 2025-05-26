@@ -1,0 +1,38 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Restaurant {
+  id          String   @id
+  name        String
+  image       String
+  cuisine     String
+  rating      Float
+  priceLevel  Int     // 1-4 representing $-$$$$
+  address     String
+  latitude    Float
+  longitude   Float
+  lastUpdated DateTime @default(now())
+  isOpen      Boolean  @default(true)
+
+  // Additional fields for external IDs
+  mapboxId    String?  @unique
+  googleId    String?  @unique
+
+  @@index([latitude, longitude])
+  @@index([cuisine])
+}
+
+model CuisineType {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique
+  count Int     @default(0)
+} 
