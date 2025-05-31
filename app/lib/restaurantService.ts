@@ -1,8 +1,6 @@
-import { PrismaClient } from '@prisma/client'
-import axios, { AxiosResponse, AxiosError } from 'axios'
+import { prisma } from './prisma'
+import axios, { AxiosResponse, AxiosError, RawAxiosRequestHeaders } from 'axios'
 import { Location } from '@/app/types'
-
-const prisma = new PrismaClient()
 
 interface GooglePlacesResponse {
   status: string
@@ -73,25 +71,25 @@ function isCacheValid(entry: CacheEntry): boolean {
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 // Helper function to handle rate limiting
-async function makeRequestWithRetry(url: string, retries = 3, delayMs = 1000): Promise<AxiosResponse<GooglePlacesResponse> | { data: { results: never[] } }> {
+async function makeRequestWithRetry(url: string, retries = 3, delayMs = 1000): Promise<AxiosResponse<GooglePlacesResponse>> {
   for (let i = 0; i < retries; i++) {
     try {
       console.log('Making request to:', url)
-      const response = await axios.get(url)
-      console.log('Response status:', response.status)
+      const response = await axios.get<GooglePlacesResponse>(url)
+      console.log('Response HTTP status:', response.status)
       console.log('Response data:', JSON.stringify(response.data, null, 2))
       
       if (response.data.status === 'ZERO_RESULTS') {
         console.log('Google API returned ZERO_RESULTS')
-        return { data: { results: [] } }
+        return response
       }
       if (response.data.status === 'OK') {
         return response
       }
       throw new Error(`Google API returned status: ${response.data.status}`)
-    } catch (error: any) {
-      console.error('Request error:', error.response?.data || error.message)
-      if (error.response?.status === 429 && i < retries - 1) {
+    } catch (error) {
+      console.error('Request error:', (error as AxiosError)?.response?.data || (error as Error).message)
+      if ((error as AxiosError)?.response?.status === 429 && i < retries - 1) {
         console.log(`Rate limited, waiting ${delayMs}ms before retry ${i + 1}`)
         await delay(delayMs)
         // Exponential backoff
@@ -147,7 +145,8 @@ export async function getPlaceDetails(placeId: string) {
       menuUrl: result?.menu_url || result?.url, // Try menu_url first, fallback to Maps URL
       googleMapsUrl: result?.url, // Store the Google Maps URL separately
       priceLevel: result?.price_level,
-      openingHours: result?.opening_hours?.weekday_text,
+      openingHours: result?.opening_hours?.weekday_text || [],
+      currentOpenStatus: result?.opening_hours?.open_now,
       services: {
         delivery: result?.delivery || false,
         takeout: result?.takeout || false,
@@ -234,35 +233,74 @@ export async function findNearbyRestaurants(
       take: 20,
     })
 
+    // If we have results from database, fetch fresh opening hours for each
     if (dbRestaurants.length >= 5) {
-      const results = dbRestaurants.map((restaurant: any) => ({
-        ...restaurant,
-        location: {
-          latitude: restaurant.latitude,
-          longitude: restaurant.longitude
-        },
-        distance: calculateDistance(
-          location.latitude,
-          location.longitude,
-          restaurant.latitude,
-          restaurant.longitude
-        )
-      }))
+      const updatedResults = await Promise.all(dbRestaurants.map(async (restaurant: any) => {
+        // Fetch fresh details from Google Places API for opening hours
+        if (restaurant.googleId) {
+          try {
+            const details = await getPlaceDetails(restaurant.googleId);
+            if (details) {
+              // Update the database with fresh opening status
+              await prisma.restaurant.update({
+                where: { id: restaurant.id },
+                data: { 
+                  isOpen: details.currentOpenStatus ?? true,
+                  lastUpdated: new Date()
+                }
+              });
+              
+              return {
+                ...restaurant,
+                location: {
+                  latitude: restaurant.latitude,
+                  longitude: restaurant.longitude
+                },
+                distance: calculateDistance(
+                  location.latitude,
+                  location.longitude,
+                  restaurant.latitude,
+                  restaurant.longitude
+                ),
+                isOpenNow: details.currentOpenStatus ?? true
+              };
+            }
+          } catch (error) {
+            console.error(`Error updating opening hours for ${restaurant.name}:`, error);
+          }
+        }
+        
+        // Fallback to existing data if update fails
+        return {
+          ...restaurant,
+          location: {
+            latitude: restaurant.latitude,
+            longitude: restaurant.longitude
+          },
+          distance: calculateDistance(
+            location.latitude,
+            location.longitude,
+            restaurant.latitude,
+            restaurant.longitude
+          ),
+          isOpenNow: true // Default to open if we can't get current status
+        };
+      }));
 
       // Cache the results
       cache.set(cacheKey, {
         timestamp: Date.now(),
-        data: results,
+        data: updatedResults,
         key: cacheKey
-      })
+      });
 
-      return results
+      return updatedResults;
     }
   } catch (error) {
     console.error('Error querying database:', error)
   }
 
-  // If not enough results in database, fetch from Google Places
+  // If not enough results in database or database query failed, fetch from Google Places
   try {
     const radiusInMeters = Math.min(maxDistance * 1000, 50000)
     let searchString = buildSearchString(searchQuery, cuisineType, dietary)
@@ -295,17 +333,40 @@ export async function findNearbyRestaurants(
       key: cacheKey
     })
 
-    // Store the results in our database for future use
-    try {
-      await prisma.restaurant.createMany({
-        data: restaurants.map(restaurant => ({
-          ...restaurant,
-          googleId: restaurant.id.toString()
-        })),
-        skipDuplicates: true
-      })
-    } catch (error) {
-      console.error('Error storing restaurants in database:', error)
+    // Store new restaurants in database
+    for (const restaurant of restaurants) {
+      try {
+        await prisma.restaurant.upsert({
+          where: { id: restaurant.id.toString() },
+          update: {
+            name: restaurant.name,
+            image: restaurant.image,
+            cuisine: restaurant.cuisine,
+            rating: restaurant.rating,
+            priceLevel: restaurant.priceLevel || 1,
+            address: restaurant.address,
+            latitude: restaurant.location.latitude,
+            longitude: restaurant.location.longitude,
+            isOpen: restaurant.isOpenNow,
+            lastUpdated: new Date()
+          },
+          create: {
+            id: restaurant.id.toString(),
+            name: restaurant.name,
+            image: restaurant.image,
+            cuisine: restaurant.cuisine,
+            rating: restaurant.rating,
+            priceLevel: restaurant.priceLevel || 1,
+            address: restaurant.address,
+            latitude: restaurant.location.latitude,
+            longitude: restaurant.location.longitude,
+            isOpen: restaurant.isOpenNow,
+            googleId: restaurant.id.toString()
+          }
+        })
+      } catch (error) {
+        console.error('Error upserting restaurant:', error)
+      }
     }
 
     return restaurants
@@ -364,6 +425,28 @@ async function processGoogleResults(
       // Skip if beyond max distance
       if (parseFloat(distance) > maxDistance) continue
 
+      // Determine if the place is open
+      let isOpenNow = true; // Default to open unless we have explicit information
+      
+      if (place.opening_hours?.open_now !== undefined) {
+        // Use the direct open_now status if available
+        isOpenNow = place.opening_hours.open_now;
+      } else if (details?.openingHours) {
+        // If we have detailed opening hours, try to determine current status
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const currentTime = now.toLocaleTimeString('en-US', { hour12: false });
+        
+        // Parse opening hours if available
+        if (details.openingHours && details.openingHours[dayOfWeek]) {
+          const todayHours = details.openingHours[dayOfWeek];
+          console.log(`Opening hours for ${place.name}:`, todayHours);
+          // For now, assume open if we have hours for today
+          // In a full implementation, you'd parse the hours string and check against current time
+          isOpenNow = true;
+        }
+      }
+
       const restaurant: RestaurantData = {
         id: place.place_id,
         name: place.name,
@@ -383,7 +466,7 @@ async function processGoogleResults(
           latitude: place.geometry.location.lat,
           longitude: place.geometry.location.lng
         },
-        isOpenNow: place.opening_hours?.open_now ?? false,
+        isOpenNow: isOpenNow,
         distance,
         phoneNumber: details?.phoneNumber,
         menuUrl: details?.website

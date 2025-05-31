@@ -269,7 +269,7 @@ export default function RestaurantMap({
             }}
             onCloseClick={() => setSelectedRestaurant(null)}
           >
-            <VStack align="stretch" p={2} spacing={2}>
+            <VStack align="start" spacing={2} p={2}>
               <Image
                 src={selectedRestaurant.image}
                 alt={selectedRestaurant.name}
@@ -278,12 +278,14 @@ export default function RestaurantMap({
                 objectFit="cover"
               />
               <Text fontWeight="bold">{selectedRestaurant.name}</Text>
-              <Text fontSize="sm" color="gray.600">{selectedRestaurant.address}</Text>
+              <Text fontSize="sm">{selectedRestaurant.address}</Text>
               <HStack>
-                <Badge colorScheme={selectedRestaurant.isOpen ? 'green' : 'red'}>
-                  {selectedRestaurant.isOpen ? 'Open' : 'Closed'}
+                <Badge colorScheme={selectedRestaurant.isOpenNow ? 'green' : 'red'}>
+                  {selectedRestaurant.isOpenNow ? 'Open' : 'Closed'}
                 </Badge>
-                <Badge colorScheme="primary">${selectedRestaurant.priceLevel ? selectedRestaurant.priceLevel * 15 : selectedRestaurant.averagePrice} avg</Badge>
+                <Badge>
+                  {'$'.repeat(selectedRestaurant.priceLevel || 1)}
+                </Badge>
                 <Badge colorScheme="yellow">
                   <HStack spacing={1}>
                     <Icon as={FaStar} />

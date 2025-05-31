@@ -6,8 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Restaurant {
@@ -21,7 +21,7 @@ model Restaurant {
   latitude    Float
   longitude   Float
   lastUpdated DateTime @default(now())
-  isOpen      Boolean  @default(true)
+  isOpen      Boolean
 
   // Additional fields for external IDs
   googleId    String?  @unique

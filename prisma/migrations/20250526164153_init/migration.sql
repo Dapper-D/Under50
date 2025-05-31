@@ -1,29 +1,29 @@
 -- CreateTable
 CREATE TABLE "Restaurant" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "image" TEXT NOT NULL,
     "cuisine" TEXT NOT NULL,
-    "rating" REAL NOT NULL,
+    "rating" DOUBLE PRECISION NOT NULL,
     "priceLevel" INTEGER NOT NULL,
     "address" TEXT NOT NULL,
-    "latitude" REAL NOT NULL,
-    "longitude" REAL NOT NULL,
-    "lastUpdated" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "latitude" DOUBLE PRECISION NOT NULL,
+    "longitude" DOUBLE PRECISION NOT NULL,
+    "lastUpdated" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "isOpen" BOOLEAN NOT NULL DEFAULT true,
-    "mapboxId" TEXT,
-    "googleId" TEXT
+    "googleId" TEXT,
+
+    CONSTRAINT "Restaurant_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "CuisineType" (
-    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
-    "count" INTEGER NOT NULL DEFAULT 0
-);
+    "count" INTEGER NOT NULL DEFAULT 0,
 
--- CreateIndex
-CREATE UNIQUE INDEX "Restaurant_mapboxId_key" ON "Restaurant"("mapboxId");
+    CONSTRAINT "CuisineType_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Restaurant_googleId_key" ON "Restaurant"("googleId");
