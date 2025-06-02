@@ -12,6 +12,7 @@ import {
   useToken,
   useDisclosure,
   VStack,
+  Skeleton,
 } from '@chakra-ui/react'
 import { FaStar, FaMapMarkerAlt, FaDirections, FaClock, FaUsers, FaDumbbell } from 'react-icons/fa'
 import { useState, useEffect } from 'react'
@@ -107,16 +108,18 @@ export default function ActivityCard(props: ActivityCardProps) {
       onClick={onOpen}
     >
       <Box position="relative" height="200px">
-        <NextImage
-          src={props.image}
-          alt={props.name}
-          fill
-          style={{ objectFit: 'cover' }}
-          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-          priority={false}
-          onLoad={() => setImageLoaded(true)}
-          loading="lazy"
-        />
+        <Skeleton isLoaded={imageLoaded} height="200px" position="relative">
+          <NextImage
+            src={props.image}
+            alt={props.name}
+            fill
+            style={{ objectFit: 'cover' }}
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            priority={false}
+            onLoad={() => setImageLoaded(true)}
+            loading="lazy"
+          />
+        </Skeleton>
       </Box>
 
       <Box p={4}>

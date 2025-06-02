@@ -70,7 +70,9 @@ export async function GET(request: Request) {
       const restaurants = await findNearbyRestaurants(
         {
           latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude)
+          longitude: parseFloat(longitude),
+          lat: parseFloat(latitude),
+          lng: parseFloat(longitude)
         },
         maxPrice ? parseInt(maxPrice) : undefined,
         cuisineType ?? undefined,

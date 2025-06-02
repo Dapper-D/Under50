@@ -119,9 +119,15 @@ export interface Filters {
   maxDistance?: number
   dietary?: string[]
   searchQuery?: string
+  latitude?: number
+  longitude?: number
+  lat?: number
+  lng?: number
 }
 
 export interface Location {
   latitude: number
   longitude: number
+  lat: number
+  lng: number
 } 

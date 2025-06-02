@@ -59,7 +59,9 @@ export default function Home() {
   // Transform location to match map component's expected format
   const transformedLocation = location ? {
     lat: location.latitude,
-    lng: location.longitude
+    lng: location.longitude,
+    latitude: location.latitude,
+    longitude: location.longitude
   } : null
 
   // Add debouncing for slider changes

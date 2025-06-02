@@ -164,7 +164,7 @@ export default function RestaurantCard(props: RestaurantCardProps) {
         onClick={onOpen}
       >
         <Box position="relative" height="200px">
-          <Skeleton isLoaded={imageLoaded} height="200px">
+          <Skeleton isLoaded={imageLoaded} height="200px" position="relative">
             <NextImage
               src={props.image}
               alt={props.name}

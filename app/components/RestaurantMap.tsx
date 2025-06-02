@@ -42,7 +42,7 @@ interface RestaurantMapProps {
   center?: [number, number]
   zoom?: number
   maxPrice?: number
-  userLocation?: Location
+  userLocation?: Location | null
 }
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())

@@ -40,7 +40,12 @@ interface RestaurantData {
   address: string
   latitude: number
   longitude: number
-  location: Location
+  location: {
+    latitude: number
+    longitude: number
+    lat: number
+    lng: number
+  }
   isOpenNow: boolean
   googleId?: string
   distance?: string
@@ -464,7 +469,9 @@ async function processGoogleResults(
         longitude: place.geometry.location.lng,
         location: {
           latitude: place.geometry.location.lat,
-          longitude: place.geometry.location.lng
+          longitude: place.geometry.location.lng,
+          lat: place.geometry.location.lat,
+          lng: place.geometry.location.lng
         },
         isOpenNow: isOpenNow,
         distance,

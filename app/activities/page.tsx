@@ -72,8 +72,10 @@ export default function ActivitiesPage() {
   // Transform location to match map component's expected format
   const transformedLocation = location ? {
     lat: location.latitude,
-    lng: location.longitude
-  } : null
+    lng: location.longitude,
+    latitude: location.latitude,
+    longitude: location.longitude
+  } : null;
 
   return (
     <PageLayout
@@ -223,7 +225,7 @@ export default function ActivitiesPage() {
                 <Text mb={2}>Difficulty Level</Text>
                 <RadioGroup
                   value={filters.difficulty || 'all'}
-                  onChange={(value: string) => updateFilters({ difficulty: value })}
+                  onChange={(value) => updateFilters({ difficulty: value === 'all' ? undefined : value as 'Easy' | 'Moderate' | 'Challenging' })}
                 >
                   <Stack>
                     <Radio value="all">All Levels</Radio>

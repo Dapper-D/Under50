@@ -29,7 +29,15 @@ export function useRestaurants(initialFilters: Filters = { cuisine: 'all' }) {
           })
           setLocation({
             latitude: position.coords.latitude,
-            longitude: position.coords.longitude
+            longitude: position.coords.longitude,
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          })
+          updateFilters({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
           })
         },
         (error) => {
@@ -37,7 +45,9 @@ export function useRestaurants(initialFilters: Filters = { cuisine: 'all' }) {
           // Set default location (New York City) if geolocation fails
           setLocation({
             latitude: 40.7128,
-            longitude: -74.006
+            longitude: -74.006,
+            lat: 40.7128,
+            lng: -74.006
           })
         }
       )
@@ -45,7 +55,9 @@ export function useRestaurants(initialFilters: Filters = { cuisine: 'all' }) {
       console.log('Geolocation not supported, setting default NYC location')
       setLocation({
         latitude: 40.7128,
-        longitude: -74.006
+        longitude: -74.006,
+        lat: 40.7128,
+        lng: -74.006
       })
     }
   }, [])

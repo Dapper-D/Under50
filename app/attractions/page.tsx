@@ -66,8 +66,10 @@ export default function AttractionsPage() {
   // Transform location to match map component's expected format
   const transformedLocation = location ? {
     lat: location.latitude,
-    lng: location.longitude
-  } : null
+    lng: location.longitude,
+    latitude: location.latitude,
+    longitude: location.longitude
+  } : null;
 
   return (
     <PageLayout
