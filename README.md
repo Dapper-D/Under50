@@ -3,6 +3,17 @@ live link at https://under50.vercel.app/
 
 A web application to find affordable restaurants near you, with prices under $50 per person on average.
 
+# Tech Stack
+Frontend: Next.js 14, React 18, TypeScript
+UI & Styling: Chakra UI, Emotion, Framer Motion
+Maps & Location: Google Maps API, Google Places API, Google Geocoding API
+Data Fetching: SWR, Axios
+Backend: Next.js API Routes / Server-side functionality
+Database: PostgreSQL
+ORM: Prisma
+Deployment: Vercel
+Tooling: npm, ESLint
+
 ## Environment Setup
 
 Before running the application, you need to set up the following environment variables. Create a `.env.local` file in the root directory with the following variables:
