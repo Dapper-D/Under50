@@ -2,11 +2,19 @@ import { Box, Text } from '@chakra-ui/react'
 
 const Logo = () => {
   return (
+    // A plain <a href="/"> (not Next's <Link>) so a click does a full page
+    // reload: it refreshes the home page, or goes home from other pages.
     <Box 
+      as="a"
+      href="/"
+      aria-label="Under 50 home"
       display="flex" 
       alignItems="center" 
       gap={2}
-      role="group"
+      data-group // drives the _groupHover animations below (same as role="group", but keeps the link role)
+      cursor="pointer"
+      textDecoration="none"
+      _hover={{ textDecoration: 'none' }}
     >
       <Box 
         as="svg" 

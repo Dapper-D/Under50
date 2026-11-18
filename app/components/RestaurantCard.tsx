@@ -22,7 +22,7 @@ import RestaurantDetails from './RestaurantDetails'
 import { Restaurant } from '@/app/types'
 import NextImage from 'next/image'
 
-type RestaurantCardProps = Omit<Restaurant, 'id' | 'location' | 'menu' | 'dietary'>
+type RestaurantCardProps = Omit<Restaurant, 'location' | 'menu' | 'dietary'>
 
 function rgbToHex(r: number, g: number, b: number): string {
   return '#' + [r, g, b].map(x => {
@@ -269,7 +269,7 @@ export default function RestaurantCard(props: RestaurantCardProps) {
       <RestaurantDetails
         restaurant={{
           ...props,
-          id: props.name, // Using name as id since we don't have the actual id
+          id: props.id, // Google place ID, used to look up the menu and website links
           location: {
             latitude: 0,
             longitude: 0

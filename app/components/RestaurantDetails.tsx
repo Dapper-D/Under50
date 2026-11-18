@@ -16,14 +16,10 @@ import {
   Icon,
   SimpleGrid,
   Spinner,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
+  Button,
+  Stack,
 } from '@chakra-ui/react'
-import { FaStar, FaMapMarkerAlt } from 'react-icons/fa'
+import { FaStar, FaMapMarkerAlt, FaUtensils, FaGlobe } from 'react-icons/fa'
 import { Restaurant } from '@/app/types'
 import { useState, useEffect } from 'react'
 
@@ -33,73 +29,46 @@ interface RestaurantDetailsProps {
   onClose: () => void
 }
 
-interface MenuItem {
-  name: string;
-  description?: string;
-  price: number;
-  category?: string;
+interface PlaceLinks {
+  googleMapsUrl?: string
+  website?: string
 }
+
+// Google Maps page for a place. Google's Places API doesn't return menu items,
+// so "View menu" opens the place on Google Maps, where its Menu tab and menu
+// photos live. This URL works without an API call; the details request below
+// swaps in Google's own link when it arrives.
+const mapsUrlFor = (name: string, placeId?: string | number) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}` +
+  (placeId ? `&query_place_id=${encodeURIComponent(String(placeId))}` : '')
 
 export default function RestaurantDetails({ restaurant, isOpen, onClose }: RestaurantDetailsProps) {
   const [loading, setLoading] = useState(false);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [links, setLinks] = useState<PlaceLinks>({});
 
   useEffect(() => {
-    async function fetchMenu() {
+    async function fetchLinks() {
       if (!isOpen || !restaurant.id) return;
-      
+
       setLoading(true);
       try {
-        // Try to fetch menu from Google Places API
-        const response = await fetch(`/api/restaurants/${restaurant.id}/menu`);
-        if (!response.ok) throw new Error('Failed to fetch menu');
+        const response = await fetch(`/api/restaurants/${encodeURIComponent(String(restaurant.id))}/details`);
+        if (!response.ok) throw new Error('Failed to fetch details');
         const data = await response.json();
-        setMenuItems(data.menu || []);
+        setLinks({ googleMapsUrl: data.googleMapsUrl, website: data.website });
       } catch (error) {
-        console.error('Error fetching menu:', error);
-        // If no menu is available, create some example items based on cuisine type
-        const exampleItems = generateExampleMenu(restaurant.cuisine);
-        setMenuItems(exampleItems);
+        console.error('Error fetching restaurant links:', error);
+        setLinks({});
       } finally {
         setLoading(false);
       }
     }
 
-    fetchMenu();
-  }, [isOpen, restaurant.id, restaurant.cuisine]);
+    fetchLinks();
+  }, [isOpen, restaurant.id]);
 
-  // Helper function to generate example menu items based on cuisine
-  const generateExampleMenu = (cuisine: string): MenuItem[] => {
-    // This is a fallback when we can't get the real menu
-    const basePrice = restaurant.averagePrice || 15;
-    
-    return [
-      {
-        name: `${cuisine} Special`,
-        description: `Our signature ${cuisine.toLowerCase()} dish`,
-        price: basePrice * 1.2,
-        category: 'Specials'
-      },
-      {
-        name: `Traditional ${cuisine} Plate`,
-        description: `Classic ${cuisine.toLowerCase()} flavors`,
-        price: basePrice,
-        category: 'Mains'
-      },
-      {
-        name: `${cuisine} Starter`,
-        description: 'Perfect way to begin your meal',
-        price: basePrice * 0.6,
-        category: 'Appetizers'
-      },
-      {
-        name: `${cuisine} Dessert`,
-        description: 'Sweet ending to your meal',
-        price: basePrice * 0.8,
-        category: 'Desserts'
-      }
-    ];
-  };
+  const menuHref = links.googleMapsUrl || mapsUrlFor(restaurant.name, restaurant.id);
+  const websiteHref = links.website || restaurant.website || restaurant.menuUrl;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="xl" scrollBehavior="inside">
@@ -141,36 +110,41 @@ export default function RestaurantDetails({ restaurant, isOpen, onClose }: Resta
 
             {/* Menu Section */}
             <Box>
-              <Heading size="md" mb={4}>Menu</Heading>
-              {loading ? (
-                <Box display="flex" justifyContent="center" py={8}>
-                  <Spinner size="xl" />
-                </Box>
-              ) : menuItems.length > 0 ? (
-                <Table variant="simple">
-                  <Thead>
-                    <Tr>
-                      <Th>Item</Th>
-                      <Th>Description</Th>
-                      <Th isNumeric>Price</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {menuItems.map((item, index) => (
-                      <Tr key={index}>
-                        <Td fontWeight="medium">{item.name}</Td>
-                        <Td fontSize="sm" color="gray.600">{item.description || ''}</Td>
-                        <Td isNumeric>${item.price.toFixed(2)}</Td>
-                      </Tr>
-                    ))}
-                  </Tbody>
-                </Table>
-              ) : (
-                <Text color="gray.500" textAlign="center">
-                  Menu information is currently unavailable.
-                  Please visit the restaurant or check their website for the most up-to-date menu.
-                </Text>
-              )}
+              <Heading size="md" mb={2}>Menu</Heading>
+              <Text color="gray.600" fontSize="sm" mb={4}>
+                See the menu and menu photos on Google Maps, or on the restaurant&apos;s own website.
+              </Text>
+              <Stack direction={{ base: 'column', sm: 'row' }} spacing={3}>
+                <Button
+                  as="a"
+                  href={menuHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  colorScheme="orange"
+                  leftIcon={<Icon as={FaUtensils} />}
+                  flex={1}
+                >
+                  View menu
+                </Button>
+                {websiteHref ? (
+                  <Button
+                    as="a"
+                    href={websiteHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    variant="outline"
+                    colorScheme="orange"
+                    leftIcon={<Icon as={FaGlobe} />}
+                    flex={1}
+                  >
+                    Website
+                  </Button>
+                ) : loading ? (
+                  <Box display="flex" alignItems="center" justifyContent="center" flex={1}>
+                    <Spinner size="sm" />
+                  </Box>
+                ) : null}
+              </Stack>
             </Box>
 
             {/* Cuisine and Price Range */}

@@ -215,6 +215,7 @@ export async function findNearbyRestaurants(
               
               return {
                 ...restaurant,
+                averagePrice: (restaurant.priceLevel || 2) * 15, // not stored in the database
                 image: fresh.image || FALLBACK_IMAGE,
                 location: {
                   latitude: restaurant.latitude,
@@ -237,6 +238,7 @@ export async function findNearbyRestaurants(
         // Fallback to existing data if update fails
         return {
           ...restaurant,
+          averagePrice: (restaurant.priceLevel || 2) * 15, // not stored in the database
           image: FALLBACK_IMAGE,
           location: {
             latitude: restaurant.latitude,

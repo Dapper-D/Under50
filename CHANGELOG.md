@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased: menu links, logo refresh, price fix
+
+### Changed
+- **Menu:** the restaurant modal's Menu section now has a **View menu** button that opens the restaurant's Google Maps page, with its Menu tab and menu photos, and a **Website** button. Google's Places API doesn't provide menu items, so the app no longer makes up example dishes and prices when it can't find a menu. If the details request fails, View menu falls back to a Google Maps link built from the place ID.
+- **Logo:** clicking "Under 50" now does a full page load of the home page, so it refreshes the page. It's a plain link, and the hover and steam animations are unchanged. Group hover now uses `data-group` instead of `role="group"`, so screen readers announce the logo as a link.
+
+### Fixed
+- Restaurants loaded from the database had no `averagePrice`, so their cards showed "$undefined avg". It's now worked out from the price level, the same way as fresh results.
+- The restaurant modal was given the restaurant's name as its ID, so it couldn't look anything up. It now gets the real Google place ID.
+
+### Note
+- `app/api/restaurants/[id]/menu` is no longer called. It's left in place.
+
+
 ## Unreleased: move to Places API (New)
 
 Google stopped letting new Cloud projects enable the legacy Places API on March 1, 2025. This release moves every Places call to Places API (New), so the app works with a key from a new project.
