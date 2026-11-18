@@ -1,115 +1,78 @@
 import { NextResponse } from 'next/server'
-import { Client, PlacesNearbyResponse, PlaceDetailsResponse } from '@googlemaps/google-maps-services-js'
+import { searchNearby, serverKey, priceLevelToNumber, photoProxyUrl, distanceKm, MAX_RADIUS_M } from '@/app/lib/googlePlaces'
 
-const client = new Client({})
+const PLACEHOLDER = 'https://via.placeholder.com/400x300?text=No+Image'
+
+// One Nearby Search (New) call returns everything this route needs, so there is
+// no extra Place Details request per result.
+const FIELDS = [
+  'id', 'displayName', 'formattedAddress', 'shortFormattedAddress', 'location', 'types', 'primaryType',
+  'rating', 'priceLevel', 'photos', 'currentOpeningHours', 'regularOpeningHours',
+  'nationalPhoneNumber', 'websiteUri', 'editorialSummary'
+]
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const lat = searchParams.get('lat')
   const lng = searchParams.get('lng')
   const category = searchParams.get('category') || 'tourist_attraction'
-  const maxDistance = parseInt(searchParams.get('maxDistance') || '10000')
+  const maxDistance = parseFloat(searchParams.get('maxDistance') || '10') // km
   const isOpen = searchParams.get('isOpen') === 'true'
 
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    console.error('GOOGLE_MAPS_API_KEY is not configured')
-    return NextResponse.json(
-      { error: 'Google Maps API is not configured' },
-      { status: 500 }
-    )
+  if (!serverKey()) {
+    console.error('GOOGLE_PLACES_API_KEY is not configured')
+    return NextResponse.json({ error: 'Google Places API is not configured' }, { status: 500 })
   }
 
   if (!lat || !lng) {
-    return NextResponse.json(
-      { error: 'Latitude and longitude are required' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'Latitude and longitude are required' }, { status: 400 })
   }
 
   try {
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY as string;
-    
-    const response: PlacesNearbyResponse = await client.placesNearby({
-      params: {
-        location: { lat: parseFloat(lat), lng: parseFloat(lng) },
-        radius: maxDistance * 1000, // Convert km to meters
-        type: category === 'all' ? 'tourist_attraction' : category as any,
-        opennow: isOpen,
-        key: apiKey
-      }
+    const userLat = parseFloat(lat)
+    const userLng = parseFloat(lng)
+    const places = await searchNearby({
+      types: [category === 'all' ? 'tourist_attraction' : category],
+      lat: userLat,
+      lng: userLng,
+      radiusM: Math.min(maxDistance * 1000, MAX_RADIUS_M),
+      fields: FIELDS
     })
 
-    const attractions = await Promise.all(
-      response.data.results.map(async (place) => {
-        if (!place.geometry?.location || !place.place_id) {
-          return null
-        }
-
-        // Get additional details for each place
-        const details: PlaceDetailsResponse = await client.placeDetails({
-          params: {
-            place_id: place.place_id,
-            fields: ['name', 'formatted_address', 'photo', 'rating', 'opening_hours', 'price_level', 'website', 'formatted_phone_number'],
-            key: apiKey
-          }
-        })
-
-        const photoReference = place.photos?.[0]?.photo_reference
-        const photoUrl = photoReference
-          ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photoReference}&key=${apiKey}`
-          : 'https://via.placeholder.com/400x300?text=No+Image'
-
-        // Calculate distance using Haversine formula
-        const R = 6371 // Earth's radius in kilometers
-        const lat1 = parseFloat(lat)
-        const lon1 = parseFloat(lng)
-        const lat2 = place.geometry.location.lat
-        const lon2 = place.geometry.location.lng
-        
-        const dLat = (lat2 - lat1) * Math.PI / 180
-        const dLon = (lon2 - lon1) * Math.PI / 180
-        
-        const a = 
-          Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-          Math.sin(dLon/2) * Math.sin(dLon/2)
-        
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-        const distance = R * c
-
+    const attractions = places
+      .filter((place) => place.location && place.id)
+      // Nearby Search (New) has no openNow filter, so apply it here
+      .filter((place) => !isOpen || place.currentOpeningHours?.openNow === true)
+      .map((place) => {
+        const { latitude, longitude } = place.location!
+        const name = place.displayName?.text || 'Unknown Location'
+        const hours = place.currentOpeningHours || place.regularOpeningHours
         return {
-          id: place.place_id,
-          name: place.name || 'Unknown Location',
-          image: photoUrl,
-          category: place.types?.[0] || 'tourist_attraction',
+          id: place.id,
+          name,
+          image: photoProxyUrl(place.photos?.[0]?.name) || PLACEHOLDER,
+          category: place.primaryType || place.types?.[0] || 'tourist_attraction',
           rating: place.rating || 0,
-          priceLevel: place.price_level,
-          distance: `${distance.toFixed(1)} km`,
-          isOpenNow: details.data.result.opening_hours?.open_now || false,
-          location: {
-            latitude: place.geometry.location.lat,
-            longitude: place.geometry.location.lng
-          },
-          address: place.vicinity || 'Address not available',
-          description: place.editorial_summary?.overview || `Visit ${place.name || 'this location'} and explore one of the area's top attractions.`,
-          phoneNumber: details.data.result.formatted_phone_number,
-          website: details.data.result.website,
-          openingHours: details.data.result.opening_hours?.weekday_text,
-          photos: place.photos?.map(photo => ({
-            reference: photo.photo_reference,
-            width: photo.width,
-            height: photo.height
+          priceLevel: priceLevelToNumber(place.priceLevel),
+          distance: `${distanceKm(userLat, userLng, latitude, longitude).toFixed(1)} km`,
+          isOpenNow: place.currentOpeningHours?.openNow || false,
+          location: { latitude, longitude },
+          address: place.shortFormattedAddress || place.formattedAddress || 'Address not available',
+          description: place.editorialSummary?.text || `Visit ${name} and explore one of the area's top attractions.`,
+          phoneNumber: place.nationalPhoneNumber,
+          website: place.websiteUri,
+          openingHours: hours?.weekdayDescriptions,
+          photos: place.photos?.map((photo) => ({
+            reference: photo.name,
+            width: photo.widthPx,
+            height: photo.heightPx
           })) || []
         }
       })
-    )
 
-    return NextResponse.json({ attractions: attractions.filter(Boolean) })
+    return NextResponse.json({ attractions })
   } catch (error) {
     console.error('Error fetching attractions:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch attractions' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to fetch attractions' }, { status: 500 })
   }
-} 
+}

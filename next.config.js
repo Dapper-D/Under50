@@ -3,10 +3,11 @@ const nextConfig = {
   images: {
     remotePatterns: [
       {
+        // fallback restaurant photo
         protocol: 'https',
-        hostname: 'maps.googleapis.com',
+        hostname: 'images.unsplash.com',
         port: '',
-        pathname: '/maps/api/place/photo/**',
+        pathname: '/**',
       },
       {
         protocol: 'https',

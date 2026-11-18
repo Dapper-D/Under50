@@ -6,7 +6,7 @@ A web application to find affordable restaurants near you, with prices under $50
 # Tech Stack
 Frontend: Next.js 14, React 18, TypeScript
 UI & Styling: Chakra UI, Emotion, Framer Motion
-Maps & Location: Google Maps API, Google Places API, Google Geocoding API
+Maps & Location: Google Maps JavaScript API, Google Places API (New)
 Data Fetching: SWR, Axios
 Backend: Next.js API Routes / Server-side functionality
 Database: PostgreSQL
@@ -16,35 +16,38 @@ Tooling: npm, ESLint
 
 ## Environment Setup
 
-Before running the application, you need to set up the following environment variables. Create a `.env.local` file in the root directory with the following variables:
-
-### Required Environment Variables
+Copy `.env.example` to `.env.local` in the project root (next to `package.json`) and fill it in. `.env.local` is git-ignored; never commit it.
 
 ```env
-# Google Maps & Places API Configuration
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
-GOOGLE_PLACES_API_KEY=your_google_places_api_key_here
+# Browser key: shows the map
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=
 
-# Database Configuration
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+# Server key: restaurant search, details, photos, attractions and activities
+GOOGLE_PLACES_API_KEY=
+
+# PostgreSQL connection string used by Prisma
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 ```
 
-### How to Obtain API Keys
+`GOOGLE_MAPS_API_KEY` is still read as a fallback for the server key, so older setups keep working.
 
-#### Google Maps & Places API
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the following APIs:
-   - Google Maps JavaScript API
-   - Google Places API
-   - Google Geocoding API
-4. Go to the Credentials page
-5. Create a new API key
-6. Restrict the API key:
-   - For `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`: Restrict to Maps JavaScript API and your website domain
-   - For `GOOGLE_PLACES_API_KEY`: Restrict to Places API and your server IP
+### Get the Google keys
 
-#### Database Setup
+The app uses **Places API (New)**. The legacy Places API can't be enabled on Google Cloud projects created after March 1, 2025.
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/), create or pick a project, and turn on billing.
+2. Under **APIs & Services > Library**, enable **Maps JavaScript API** and **Places API (New)**.
+3. Under **APIs & Services > Credentials**, choose **Create credentials > API key** twice, once for each key below.
+4. Restrict each key:
+   - **Browser key** (`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`). Application restriction: Websites, with `https://under50.vercel.app/*` and `http://localhost:3000/*`. API restriction: Maps JavaScript API.
+   - **Server key** (`GOOGLE_PLACES_API_KEY`). API restriction: Places API (New). Vercel has no fixed outgoing IP, so don't add an IP restriction there.
+5. Check the server key with `node test-api.js`. It should print three nearby restaurants.
+
+### Deploy on Vercel
+
+Add the same three variables under **Project > Settings > Environment Variables** for Production (and Preview if you test pull requests), then redeploy. `NEXT_PUBLIC_` values are built into the page, so a change only applies after a new deployment.
+
+### Database Setup
 1. Install PostgreSQL locally or use a cloud provider
 2. Create a new database
 3. Update the `DATABASE_URL` with your database credentials
@@ -52,12 +55,8 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
 
 ### Optional Environment Variables
 ```env
-# Set your preferred region for restaurant searches (default: ca)
+# Region used to bias searches (default: ca)
 REGION_CODE=ca
-
-# Configure rate limiting (defaults shown)
-MAX_REQUESTS_PER_MINUTE=60
-CACHE_DURATION_MINUTES=5
 ```
 
 ## Installation
