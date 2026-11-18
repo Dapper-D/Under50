@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-import { Client, PlacesNearbyResponse, PlaceDetailsResponse } from '@googlemaps/google-maps-services-js'
-
-const client = new Client({})
+import { searchNearby, serverKey, priceLevelToNumber, photoProxyUrl, distanceKm, MAX_RADIUS_M } from '@/app/lib/googlePlaces'
 
 const ACTIVITY_TYPES = [
   'amusement_park',
@@ -18,141 +16,100 @@ const ACTIVITY_TYPES = [
 
 type ActivityType = typeof ACTIVITY_TYPES[number]
 
+const PLACEHOLDER = 'https://via.placeholder.com/400x300?text=No+Image'
+
+// One Nearby Search (New) call per type returns everything this route needs,
+// so there is no extra Place Details request per result.
+const FIELDS = [
+  'id', 'displayName', 'formattedAddress', 'shortFormattedAddress', 'location', 'types',
+  'rating', 'priceLevel', 'photos', 'currentOpeningHours', 'regularOpeningHours',
+  'nationalPhoneNumber', 'websiteUri', 'editorialSummary'
+]
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const lat = searchParams.get('lat')
   const lng = searchParams.get('lng')
   const category = searchParams.get('category')
-  const maxDistance = parseInt(searchParams.get('maxDistance') || '10000')
+  const maxDistance = parseFloat(searchParams.get('maxDistance') || '10') // km
   const isAvailable = searchParams.get('isAvailable') === 'true'
   const difficulty = searchParams.get('difficulty')
 
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    console.error('GOOGLE_MAPS_API_KEY is not configured')
-    return NextResponse.json(
-      { error: 'Google Maps API is not configured' },
-      { status: 500 }
-    )
+  if (!serverKey()) {
+    console.error('GOOGLE_PLACES_API_KEY is not configured')
+    return NextResponse.json({ error: 'Google Places API is not configured' }, { status: 500 })
   }
 
   if (!lat || !lng) {
-    return NextResponse.json(
-      { error: 'Latitude and longitude are required' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'Latitude and longitude are required' }, { status: 400 })
   }
 
   try {
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY as string;
-    const types = category === 'all' ? ACTIVITY_TYPES : [category as ActivityType || ACTIVITY_TYPES[0]]
+    const userLat = parseFloat(lat)
+    const userLng = parseFloat(lng)
+    const types: readonly ActivityType[] =
+      category === 'all' ? ACTIVITY_TYPES : [(category as ActivityType) || ACTIVITY_TYPES[0]]
     const allActivities = []
 
-    // Fetch places for each activity type
     for (const type of types) {
-      const response: PlacesNearbyResponse = await client.placesNearby({
-        params: {
-          location: { lat: parseFloat(lat), lng: parseFloat(lng) },
-          radius: maxDistance * 1000, // Convert km to meters
-          type: type as any,
-          opennow: isAvailable,
-          key: apiKey
-        }
+      const places = await searchNearby({
+        types: [type],
+        lat: userLat,
+        lng: userLng,
+        radiusM: Math.min(maxDistance * 1000, MAX_RADIUS_M),
+        fields: FIELDS
       })
 
-      const activities = await Promise.all(
-        response.data.results.map(async (place) => {
-          if (!place.geometry?.location || !place.place_id) {
-            return null
-          }
+      for (const place of places) {
+        if (!place.location || !place.id) continue
+        // Nearby Search (New) has no openNow filter, so apply it here
+        if (isAvailable && place.currentOpeningHours?.openNow !== true) continue
 
-          // Get additional details for each place
-          const details: PlaceDetailsResponse = await client.placeDetails({
-            params: {
-              place_id: place.place_id,
-              fields: ['name', 'formatted_address', 'photo', 'rating', 'opening_hours', 'price_level', 'website', 'formatted_phone_number', 'review'],
-              key: apiKey
-            }
-          })
+        // Difficulty is a rough guess from the type
+        let activityDifficulty: 'Easy' | 'Moderate' | 'Challenging' = 'Moderate'
+        if (type === 'gym' || type === 'stadium') activityDifficulty = 'Challenging'
+        else if (type === 'spa' || type === 'movie_theater') activityDifficulty = 'Easy'
+        if (difficulty && difficulty !== activityDifficulty) continue
 
-          const photoReference = place.photos?.[0]?.photo_reference
-          const photoUrl = photoReference
-            ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${photoReference}&key=${apiKey}`
-            : 'https://via.placeholder.com/400x300?text=No+Image'
+        const { latitude, longitude } = place.location
+        const name = place.displayName?.text || 'Unknown Location'
+        const priceLevel = priceLevelToNumber(place.priceLevel)
+        const hours = place.currentOpeningHours || place.regularOpeningHours
 
-          // Calculate distance using Haversine formula
-          const R = 6371 // Earth's radius in kilometers
-          const lat1 = parseFloat(lat)
-          const lon1 = parseFloat(lng)
-          const lat2 = place.geometry.location.lat
-          const lon2 = place.geometry.location.lng
-          
-          const dLat = (lat2 - lat1) * Math.PI / 180
-          const dLon = (lon2 - lon1) * Math.PI / 180
-          
-          const a = 
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-            Math.sin(dLon/2) * Math.sin(dLon/2)
-          
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
-          const distance = R * c
-
-          // Determine difficulty based on reviews or type
-          let activityDifficulty: 'Easy' | 'Moderate' | 'Challenging' = 'Moderate'
-          if (type === 'gym' || type === 'stadium') {
-            activityDifficulty = 'Challenging'
-          } else if (type === 'spa' || type === 'movie_theater') {
-            activityDifficulty = 'Easy'
-          }
-
-          // Skip if difficulty filter is applied and doesn't match
-          if (difficulty && difficulty !== activityDifficulty) {
-            return null
-          }
-
-          return {
-            id: place.place_id,
-            name: place.name || 'Unknown Location',
-            image: photoUrl,
-            category: type.replace(/_/g, ' '),
-            rating: place.rating || 0,
-            priceLevel: place.price_level,
-            pricePerPerson: (place.price_level || 2) * 15, // Rough estimate based on price level
-            distance: `${distance.toFixed(1)} km`,
-            isAvailable: details.data.result.opening_hours?.open_now || false,
-            location: {
-              latitude: place.geometry.location.lat,
-              longitude: place.geometry.location.lng
-            },
-            address: place.vicinity || 'Address not available',
-            description: place.editorial_summary?.overview || `Enjoy ${place.name || 'this activity'} for an exciting experience.`,
-            phoneNumber: details.data.result.formatted_phone_number,
-            website: details.data.result.website,
-            schedule: details.data.result.opening_hours?.weekday_text,
-            duration: '2-3 hours', // Example duration
-            difficulty: activityDifficulty,
-            groupSize: {
-              min: 1,
-              max: type === 'stadium' ? 100 : type === 'movie_theater' ? 10 : 20
-            },
-            photos: place.photos?.map(photo => ({
-              reference: photo.photo_reference,
-              width: photo.width,
-              height: photo.height
-            })) || []
-          }
+        allActivities.push({
+          id: place.id,
+          name,
+          image: photoProxyUrl(place.photos?.[0]?.name) || PLACEHOLDER,
+          category: type.replace(/_/g, ' '),
+          rating: place.rating || 0,
+          priceLevel,
+          pricePerPerson: (priceLevel || 2) * 15, // rough estimate from the price level
+          distance: `${distanceKm(userLat, userLng, latitude, longitude).toFixed(1)} km`,
+          isAvailable: place.currentOpeningHours?.openNow || false,
+          location: { latitude, longitude },
+          address: place.shortFormattedAddress || place.formattedAddress || 'Address not available',
+          description: place.editorialSummary?.text || `Enjoy ${name} for an exciting experience.`,
+          phoneNumber: place.nationalPhoneNumber,
+          website: place.websiteUri,
+          schedule: hours?.weekdayDescriptions,
+          duration: '2-3 hours', // example duration
+          difficulty: activityDifficulty,
+          groupSize: {
+            min: 1,
+            max: type === 'stadium' ? 100 : type === 'movie_theater' ? 10 : 20
+          },
+          photos: place.photos?.map((photo) => ({
+            reference: photo.name,
+            width: photo.widthPx,
+            height: photo.heightPx
+          })) || []
         })
-      )
-
-      allActivities.push(...activities.filter(Boolean))
+      }
     }
 
     return NextResponse.json({ activities: allActivities })
   } catch (error) {
     console.error('Error fetching activities:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch activities' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to fetch activities' }, { status: 500 })
   }
-} 
+}

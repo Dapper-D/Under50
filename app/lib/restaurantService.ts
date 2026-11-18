@@ -1,33 +1,17 @@
 import { prisma } from './prisma'
-import axios, { AxiosResponse, AxiosError, RawAxiosRequestHeaders } from 'axios'
 import { Location } from '@/app/types'
+import {
+  searchText,
+  getPlace,
+  serverKey,
+  priceLevelToNumber,
+  priceLevelsUpTo,
+  photoProxyUrl,
+  NewPlace,
+  MAX_RADIUS_M
+} from './googlePlaces'
 
-interface GooglePlacesResponse {
-  status: string
-  results: Array<{
-    place_id: string
-    name: string
-    photos?: Array<{
-      photo_reference: string
-    }>
-    types: string[]
-    rating?: number
-    price_level?: number
-    formatted_address?: string
-    vicinity?: string
-    geometry: {
-      location: {
-        lat: number
-        lng: number
-      }
-    }
-    opening_hours?: {
-      open_now: boolean
-    }
-    formatted_phone_number?: string
-    website?: string
-  }>
-}
+const FALLBACK_IMAGE = 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4'
 
 interface RestaurantData {
   id: string
@@ -72,41 +56,6 @@ function isCacheValid(entry: CacheEntry): boolean {
   return Date.now() - entry.timestamp < CACHE_DURATION
 }
 
-// Helper function to add delay between requests
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
-// Helper function to handle rate limiting
-async function makeRequestWithRetry(url: string, retries = 3, delayMs = 1000): Promise<AxiosResponse<GooglePlacesResponse>> {
-  for (let i = 0; i < retries; i++) {
-    try {
-      console.log('Making request to:', url)
-      const response = await axios.get<GooglePlacesResponse>(url)
-      console.log('Response HTTP status:', response.status)
-      console.log('Response data:', JSON.stringify(response.data, null, 2))
-      
-      if (response.data.status === 'ZERO_RESULTS') {
-        console.log('Google API returned ZERO_RESULTS')
-        return response
-      }
-      if (response.data.status === 'OK') {
-        return response
-      }
-      throw new Error(`Google API returned status: ${response.data.status}`)
-    } catch (error) {
-      console.error('Request error:', (error as AxiosError)?.response?.data || (error as Error).message)
-      if ((error as AxiosError)?.response?.status === 429 && i < retries - 1) {
-        console.log(`Rate limited, waiting ${delayMs}ms before retry ${i + 1}`)
-        await delay(delayMs)
-        // Exponential backoff
-        delayMs *= 2
-        continue
-      }
-      throw error
-    }
-  }
-  throw new Error('Max retries reached')
-}
-
 // Helper function to calculate distance
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): string {
   const R = 6371 // Radius of the earth in km
@@ -129,51 +78,59 @@ function deg2rad(deg: number): number {
   return deg * (Math.PI/180)
 }
 
-// Add this function to get place details
+// Place details for the restaurant page (Place Details (New))
+const DETAIL_FIELDS = [
+  'id', 'nationalPhoneNumber', 'websiteUri', 'googleMapsUri', 'priceLevel',
+  'currentOpeningHours', 'regularOpeningHours',
+  'delivery', 'takeout', 'dineIn', 'servesBreakfast', 'servesLunch', 'servesDinner',
+  'photos'
+]
+
 export async function getPlaceDetails(placeId: string) {
   try {
-    console.log('Fetching place details for:', placeId);
-    const response = await axios.get<any>(`https://maps.googleapis.com/maps/api/place/details/json`, {
-      params: {
-        place_id: placeId,
-        fields: 'formatted_phone_number,website,url,price_level,opening_hours,delivery,takeout,dine_in,serves_breakfast,serves_lunch,serves_dinner,photos,menu_url',
-        key: process.env.GOOGLE_MAPS_API_KEY
-      }
-    });
-
-    console.log('Place details response:', JSON.stringify(response.data, null, 2));
-
-    const result = response.data.result;
+    const place = await getPlace(placeId, DETAIL_FIELDS)
+    const hours = place.currentOpeningHours || place.regularOpeningHours
     return {
-      phoneNumber: result?.formatted_phone_number,
-      website: result?.website,
-      menuUrl: result?.menu_url || result?.url, // Try menu_url first, fallback to Maps URL
-      googleMapsUrl: result?.url, // Store the Google Maps URL separately
-      priceLevel: result?.price_level,
-      openingHours: result?.opening_hours?.weekday_text || [],
-      currentOpenStatus: result?.opening_hours?.open_now,
+      phoneNumber: place.nationalPhoneNumber,
+      website: place.websiteUri,
+      // The new API has no menu URL; keep the old fallback of website, then the Maps page
+      menuUrl: place.websiteUri || place.googleMapsUri,
+      googleMapsUrl: place.googleMapsUri,
+      priceLevel: priceLevelToNumber(place.priceLevel),
+      openingHours: hours?.weekdayDescriptions || [],
+      currentOpenStatus: place.currentOpeningHours?.openNow,
       services: {
-        delivery: result?.delivery || false,
-        takeout: result?.takeout || false,
-        dineIn: result?.dine_in || false
+        delivery: place.delivery || false,
+        takeout: place.takeout || false,
+        dineIn: place.dineIn || false
       },
       servingTimes: {
-        breakfast: result?.serves_breakfast || false,
-        lunch: result?.serves_lunch || false,
-        dinner: result?.serves_dinner || false
+        breakfast: place.servesBreakfast || false,
+        lunch: place.servesLunch || false,
+        dinner: place.servesDinner || false
       },
-      photos: result?.photos?.map((photo: any) => ({
-        reference: photo.photo_reference,
-        width: photo.width,
-        height: photo.height
+      // `reference` now holds the photo resource name; pass it to /api/photos?name=
+      photos: place.photos?.map((photo) => ({
+        reference: photo.name,
+        width: photo.widthPx,
+        height: photo.heightPx
       }))
-    };
-  } catch (error) {
-    console.error('Error fetching place details:', error);
-    if (error instanceof AxiosError && error.response) {
-      console.error('Error response:', error.response.data);
     }
-    return null;
+  } catch (error) {
+    console.error('Error fetching place details:', error)
+    return null
+  }
+}
+
+// Cheap lookup used for restaurants already in the database: opening status and
+// a fresh photo name (Google says photo names expire and must not be stored)
+async function getFreshInfo(placeId: string): Promise<{ openNow?: boolean; image?: string } | undefined> {
+  try {
+    const place = await getPlace(placeId, ['id', 'currentOpeningHours', 'photos'])
+    return { openNow: place.currentOpeningHours?.openNow, image: photoProxyUrl(place.photos?.[0]?.name) }
+  } catch (error) {
+    console.error('Error refreshing place info:', error)
+    return undefined
   }
 }
 
@@ -187,9 +144,9 @@ export async function findNearbyRestaurants(
 ) {
   console.log('Finding nearby restaurants with params:', { location, maxPrice, cuisineType, searchQuery, maxDistance, dietary })
   
-  if (!process.env.GOOGLE_PLACES_API_KEY) {
+  if (!serverKey()) {
     console.error('Google Places API key is not configured')
-    throw new Error('Google Places API key is not configured')
+    throw new Error('Google Places API key is not configured (set GOOGLE_PLACES_API_KEY)')
   }
 
   // Build query parameters
@@ -244,19 +201,21 @@ export async function findNearbyRestaurants(
         // Fetch fresh details from Google Places API for opening hours
         if (restaurant.googleId) {
           try {
-            const details = await getPlaceDetails(restaurant.googleId);
-            if (details) {
+            const fresh = await getFreshInfo(restaurant.googleId);
+            if (fresh) {
+              const openNow = fresh.openNow ?? true;
               // Update the database with fresh opening status
               await prisma.restaurant.update({
                 where: { id: restaurant.id },
                 data: { 
-                  isOpen: details.currentOpenStatus ?? true,
+                  isOpen: openNow,
                   lastUpdated: new Date()
                 }
               });
               
               return {
                 ...restaurant,
+                image: fresh.image || FALLBACK_IMAGE,
                 location: {
                   latitude: restaurant.latitude,
                   longitude: restaurant.longitude
@@ -267,7 +226,7 @@ export async function findNearbyRestaurants(
                   restaurant.latitude,
                   restaurant.longitude
                 ),
-                isOpenNow: details.currentOpenStatus ?? true
+                isOpenNow: openNow
               };
             }
           } catch (error) {
@@ -278,6 +237,7 @@ export async function findNearbyRestaurants(
         // Fallback to existing data if update fails
         return {
           ...restaurant,
+          image: FALLBACK_IMAGE,
           location: {
             latitude: restaurant.latitude,
             longitude: restaurant.longitude
@@ -307,29 +267,28 @@ export async function findNearbyRestaurants(
 
   // If not enough results in database or database query failed, fetch from Google Places
   try {
-    const radiusInMeters = Math.min(maxDistance * 1000, 50000)
+    const radiusInMeters = Math.min(maxDistance * 1000, MAX_RADIUS_M)
     let searchString = buildSearchString(searchQuery, cuisineType, dietary)
 
-    const url = buildGooglePlacesUrl(
-      location,
-      radiusInMeters,
-      searchString,
-      maxPrice
-    )
+    // Legacy `maxprice` was 0-4; the new API takes a list of allowed levels.
+    // At the top level (4) no filter is sent, so places with no price data still show up.
+    const maxLevel = Math.min(Math.ceil(maxPrice / 15), 4)
+    const places = await searchText({
+      textQuery: searchString,
+      lat: location.latitude,
+      lng: location.longitude,
+      radiusM: radiusInMeters,
+      includedType: 'restaurant',
+      priceLevels: maxLevel < 4 ? priceLevelsUpTo(maxLevel) : undefined,
+      fields: SEARCH_FIELDS
+    })
 
-    const googleResponse = await makeRequestWithRetry(url)
-    console.log('Google Places API response status:', googleResponse.status)
-
-    if (!googleResponse.data.results || googleResponse.data.results.length === 0) {
+    if (places.length === 0) {
       console.log('No restaurants found in Google Places response')
       return []
     }
 
-    const restaurants = await processGoogleResults(
-      googleResponse.data.results,
-      location,
-      maxDistance
-    )
+    const restaurants = processGoogleResults(places, location, maxDistance)
 
     // Store results in cache
     cache.set(cacheKey, {
@@ -345,7 +304,8 @@ export async function findNearbyRestaurants(
           where: { id: restaurant.id.toString() },
           update: {
             name: restaurant.name,
-            image: restaurant.image,
+            // Photo names expire and may not be stored, so only the fallback goes in the database
+            image: FALLBACK_IMAGE,
             cuisine: restaurant.cuisine,
             rating: restaurant.rating,
             priceLevel: restaurant.priceLevel || 1,
@@ -358,7 +318,7 @@ export async function findNearbyRestaurants(
           create: {
             id: restaurant.id.toString(),
             name: restaurant.name,
-            image: restaurant.image,
+            image: FALLBACK_IMAGE,
             cuisine: restaurant.cuisine,
             rating: restaurant.rating,
             priceLevel: restaurant.priceLevel || 1,
@@ -392,98 +352,56 @@ function buildSearchString(searchQuery?: string, cuisineType?: string, dietary: 
   return terms.join(' ')
 }
 
-function buildGooglePlacesUrl(
-  location: Location,
-  radius: number,
-  searchString: string,
-  maxPrice: number
-): string {
-  return `https://maps.googleapis.com/maps/api/place/textsearch/json?` +
-    `query=${encodeURIComponent(searchString)}&` +
-    `location=${location.latitude},${location.longitude}&` +
-    `radius=${radius}&` +
-    `region=ca&` +
-    `type=restaurant&` +
-    (maxPrice ? `maxprice=${Math.min(Math.ceil(maxPrice / 15), 4)}&` : '') +
-    `key=${process.env.GOOGLE_PLACES_API_KEY}`
-}
+// Fields requested from Text Search (New). Phone and website come back in the
+// same call, so there is no per-result details request any more.
+const SEARCH_FIELDS = [
+  'id', 'displayName', 'formattedAddress', 'shortFormattedAddress', 'location',
+  'rating', 'priceLevel', 'types', 'primaryType', 'photos',
+  'currentOpeningHours', 'nationalPhoneNumber', 'websiteUri'
+]
 
-async function processGoogleResults(
-  results: any[],
+const GENERIC_TYPES = ['restaurant', 'food', 'point_of_interest', 'establishment']
+
+function processGoogleResults(
+  places: NewPlace[],
   userLocation: Location,
   maxDistance: number
-): Promise<RestaurantData[]> {
+): RestaurantData[] {
   const restaurants: RestaurantData[] = []
 
-  for (const place of results) {
-    try {
-      await delay(200) // Reduced delay to 200ms
-      const details = await getPlaceDetails(place.place_id)
-      
-      const distance = calculateDistance(
-        userLocation.latitude,
-        userLocation.longitude,
-        place.geometry.location.lat,
-        place.geometry.location.lng
-      )
+  for (const place of places) {
+    if (!place.location) continue
+    const { latitude, longitude } = place.location
 
-      // Skip if beyond max distance
-      if (parseFloat(distance) > maxDistance) continue
+    const distance = calculateDistance(userLocation.latitude, userLocation.longitude, latitude, longitude)
+    // calculateDistance returns "850m" or "3.2km"
+    const km = distance.endsWith('km') ? parseFloat(distance) : parseFloat(distance) / 1000
+    if (km > maxDistance) continue
 
-      // Determine if the place is open
-      let isOpenNow = true; // Default to open unless we have explicit information
-      
-      if (place.opening_hours?.open_now !== undefined) {
-        // Use the direct open_now status if available
-        isOpenNow = place.opening_hours.open_now;
-      } else if (details?.openingHours) {
-        // If we have detailed opening hours, try to determine current status
-        const now = new Date();
-        const dayOfWeek = now.getDay();
-        const currentTime = now.toLocaleTimeString('en-US', { hour12: false });
-        
-        // Parse opening hours if available
-        if (details.openingHours && details.openingHours[dayOfWeek]) {
-          const todayHours = details.openingHours[dayOfWeek];
-          console.log(`Opening hours for ${place.name}:`, todayHours);
-          // For now, assume open if we have hours for today
-          // In a full implementation, you'd parse the hours string and check against current time
-          isOpenNow = true;
-        }
-      }
+    const priceLevel = priceLevelToNumber(place.priceLevel)
+    const cuisine =
+      (place.primaryType && !GENERIC_TYPES.includes(place.primaryType) ? place.primaryType : undefined) ||
+      place.types?.find((type) => !GENERIC_TYPES.includes(type)) ||
+      'Restaurant'
 
-      const restaurant: RestaurantData = {
-        id: place.place_id,
-        name: place.name,
-        image: place.photos?.[0]?.photo_reference 
-          ? `/api/photos?photo_reference=${place.photos[0].photo_reference}&maxwidth=400`
-          : "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4",
-        cuisine: place.types?.find((type: string) => 
-          !['restaurant', 'food', 'point_of_interest', 'establishment'].includes(type)
-        ) || 'Restaurant',
-        rating: place.rating || 4.0,
-        priceLevel: place.price_level || 2,
-        averagePrice: (place.price_level || 2) * 15,
-        address: place.formatted_address || place.vicinity || 'Address not available',
-        latitude: place.geometry.location.lat,
-        longitude: place.geometry.location.lng,
-        location: {
-          latitude: place.geometry.location.lat,
-          longitude: place.geometry.location.lng,
-          lat: place.geometry.location.lat,
-          lng: place.geometry.location.lng
-        },
-        isOpenNow: isOpenNow,
-        distance,
-        phoneNumber: details?.phoneNumber,
-        menuUrl: details?.website
-      }
-
-      restaurants.push(restaurant)
-    } catch (error) {
-      console.error(`Error processing restaurant ${place.name}:`, error)
-      continue
-    }
+    restaurants.push({
+      id: place.id,
+      name: place.displayName?.text || 'Unnamed restaurant',
+      image: photoProxyUrl(place.photos?.[0]?.name) || FALLBACK_IMAGE,
+      cuisine,
+      rating: place.rating || 4.0,
+      priceLevel: priceLevel || 2,
+      averagePrice: (priceLevel || 2) * 15,
+      address: place.formattedAddress || place.shortFormattedAddress || 'Address not available',
+      latitude,
+      longitude,
+      location: { latitude, longitude, lat: latitude, lng: longitude },
+      // Default to open unless Google says otherwise, as before
+      isOpenNow: place.currentOpeningHours?.openNow ?? true,
+      distance,
+      phoneNumber: place.nationalPhoneNumber,
+      menuUrl: place.websiteUri
+    })
   }
 
   return restaurants

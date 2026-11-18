@@ -15,7 +15,6 @@
     "@emotion/styled": "^11.14.0",
     "@fontsource/montserrat": "^5.0.16",
     "@fontsource/open-sans": "^5.0.20",
-    "@googlemaps/google-maps-services-js": "^3.4.1",
     "@googlemaps/markerclusterer": "^2.5.3",
     "@prisma/client": "^5.22.0",
     "@react-google-maps/api": "^2.20.6",
