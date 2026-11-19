@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased: restaurant filters
+
+### Fixed
+- **Price filter:** limits were rounded up to Google's next price level, so a $20 or $25 limit still showed $30 places. Limits now round down ($20 or $25 means $ only). Every result is also checked against the limit, so the "avg" on a card is never above it. Under $15 returns no results, because $15 is the lowest estimate the app has.
+- **Distance filter:** the restaurants route never passed `maxDistance` to the search, so it was always 10 km. The saved-restaurant search also read km as miles (69 per degree instead of 111), which reached about 16 km. Both are fixed, and results farther than the limit are dropped.
+- **Open now** and **dietary** filters were sent by the page but dropped by the route. They now reach the search. Open now is passed to Google and also applied to saved restaurants.
+- Saved restaurants are only used when at least 5 of them match all the filters. Otherwise the app runs a fresh Google search.
+
+### Changed
+- At the default $50, Google is asked for $–$$$ only. That leaves out $$$$ places and places Google has no price for, which used to show as an estimated "$30 avg".
+
+
 ## Unreleased: menu links, logo refresh, price fix
 
 ### Changed

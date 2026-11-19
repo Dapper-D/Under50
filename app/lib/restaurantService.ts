@@ -78,6 +78,11 @@ function deg2rad(deg: number): number {
   return deg * (Math.PI/180)
 }
 
+// calculateDistance returns "850m" or "3.2km"
+function distanceLabelToKm(label: string): number {
+  return label.endsWith('km') ? parseFloat(label) : parseFloat(label) / 1000
+}
+
 // Place details for the restaurant page (Place Details (New))
 const DETAIL_FIELDS = [
   'id', 'nationalPhoneNumber', 'websiteUri', 'googleMapsUri', 'priceLevel',
@@ -139,10 +144,11 @@ export async function findNearbyRestaurants(
   maxPrice: number = 50,
   cuisineType?: string,
   searchQuery?: string,
-  maxDistance: number = 10,
-  dietary: string[] = []
+  maxDistance: number = 10, // km
+  dietary: string[] = [],
+  openNow: boolean = false
 ) {
-  console.log('Finding nearby restaurants with params:', { location, maxPrice, cuisineType, searchQuery, maxDistance, dietary })
+  console.log('Finding nearby restaurants with params:', { location, maxPrice, cuisineType, searchQuery, maxDistance, dietary, openNow })
   
   if (!serverKey()) {
     console.error('Google Places API key is not configured')
@@ -157,6 +163,18 @@ export async function findNearbyRestaurants(
   if (searchQuery) params.append('search', searchQuery)
   params.append('maxDistance', maxDistance.toString())
   if (dietary.length > 0) params.append('dietary', dietary.join(','))
+  if (openNow) params.append('openNow', 'true')
+
+  // Google only rates price as $-$$$$ (levels 1-4), shown as ~$15 per level.
+  // Round DOWN so every level allowed fits under maxPrice ($20 or $25 -> level 1).
+  const maxLevel = Math.min(Math.floor(maxPrice / 15), 4)
+  if (maxLevel < 1) return [] // nothing the app can price is under $15
+
+  // Final check applied to every result, so cards always match the filters
+  const matchesFilters = (r: { averagePrice: number; distance?: string; isOpenNow: boolean }) =>
+    r.averagePrice <= maxPrice &&
+    (r.distance === undefined || distanceLabelToKm(r.distance) <= maxDistance) &&
+    (!openNow || r.isOpenNow)
 
   const cacheKey = generateCacheKey(params)
   
@@ -174,12 +192,13 @@ export async function findNearbyRestaurants(
         AND: [
           {
             latitude: {
-              gte: location.latitude - maxDistance / 69,
-              lte: location.latitude + maxDistance / 69,
+              // degrees of latitude per km is 1/111 (this used 69, which is miles)
+              gte: location.latitude - maxDistance / 111,
+              lte: location.latitude + maxDistance / 111,
             },
             longitude: {
-              gte: location.longitude - maxDistance / (69 * Math.cos(location.latitude * Math.PI / 180)),
-              lte: location.longitude + maxDistance / (69 * Math.cos(location.latitude * Math.PI / 180)),
+              gte: location.longitude - maxDistance / (111 * Math.cos(location.latitude * Math.PI / 180)),
+              lte: location.longitude + maxDistance / (111 * Math.cos(location.latitude * Math.PI / 180)),
             },
           },
           cuisineType ? { cuisine: { contains: cuisineType } } : {},
@@ -189,7 +208,7 @@ export async function findNearbyRestaurants(
               { cuisine: { contains: searchQuery } }
             ]
           } : {},
-          { priceLevel: { lte: Math.ceil(maxPrice / 15) } }
+          { priceLevel: { lte: maxLevel } }
         ]
       },
       take: 20,
@@ -254,14 +273,17 @@ export async function findNearbyRestaurants(
         };
       }));
 
-      // Cache the results
-      cache.set(cacheKey, {
-        timestamp: Date.now(),
-        data: updatedResults,
-        key: cacheKey
-      });
-
-      return updatedResults;
+      // Apply distance / price / open-now precisely; if too few saved places
+      // survive, fall through to a fresh Google search instead
+      const filtered = updatedResults.filter(matchesFilters);
+      if (filtered.length >= 5) {
+        cache.set(cacheKey, {
+          timestamp: Date.now(),
+          data: filtered,
+          key: cacheKey
+        });
+        return filtered;
+      }
     }
   } catch (error) {
     console.error('Error querying database:', error)
@@ -272,9 +294,8 @@ export async function findNearbyRestaurants(
     const radiusInMeters = Math.min(maxDistance * 1000, MAX_RADIUS_M)
     let searchString = buildSearchString(searchQuery, cuisineType, dietary)
 
-    // Legacy `maxprice` was 0-4; the new API takes a list of allowed levels.
-    // At the top level (4) no filter is sent, so places with no price data still show up.
-    const maxLevel = Math.min(Math.ceil(maxPrice / 15), 4)
+    // The new API takes a list of allowed levels. At the top level (4) no filter
+    // is sent, so places with no price data still show up.
     const places = await searchText({
       textQuery: searchString,
       lat: location.latitude,
@@ -282,6 +303,7 @@ export async function findNearbyRestaurants(
       radiusM: radiusInMeters,
       includedType: 'restaurant',
       priceLevels: maxLevel < 4 ? priceLevelsUpTo(maxLevel) : undefined,
+      openNow,
       fields: SEARCH_FIELDS
     })
 
@@ -290,7 +312,7 @@ export async function findNearbyRestaurants(
       return []
     }
 
-    const restaurants = processGoogleResults(places, location, maxDistance)
+    const restaurants = processGoogleResults(places, location, maxDistance).filter(matchesFilters)
 
     // Store results in cache
     cache.set(cacheKey, {
@@ -376,9 +398,7 @@ function processGoogleResults(
     const { latitude, longitude } = place.location
 
     const distance = calculateDistance(userLocation.latitude, userLocation.longitude, latitude, longitude)
-    // calculateDistance returns "850m" or "3.2km"
-    const km = distance.endsWith('km') ? parseFloat(distance) : parseFloat(distance) / 1000
-    if (km > maxDistance) continue
+    if (distanceLabelToKm(distance) > maxDistance) continue
 
     const priceLevel = priceLevelToNumber(place.priceLevel)
     const cuisine =

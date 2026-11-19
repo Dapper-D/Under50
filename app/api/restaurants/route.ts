@@ -50,6 +50,9 @@ export async function GET(request: Request) {
     const maxPrice = searchParams.get('maxPrice')
     const cuisineType = searchParams.get('cuisine')
     const searchQuery = searchParams.get('search')
+    const maxDistance = searchParams.get('maxDistance')
+    const dietary = searchParams.get('dietary')
+    const openNow = searchParams.get('isOpen') === 'true'
     
     console.log('API: Request params:', {
       latitude,
@@ -76,7 +79,10 @@ export async function GET(request: Request) {
         },
         maxPrice ? parseInt(maxPrice) : undefined,
         cuisineType ?? undefined,
-        searchQuery ?? undefined
+        searchQuery ?? undefined,
+        maxDistance ? parseFloat(maxDistance) : undefined, // km
+        dietary ? dietary.split(',').filter(Boolean) : [],
+        openNow
       )
 
       console.log('API: Found restaurants:', restaurants?.length ?? 0)
